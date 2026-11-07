@@ -1,31 +1,28 @@
-# 云吞插件模板
+# 云吞插件：Docling Serve
 
+[Docling Serve](https://github.com/docling-project/docling-serve) 的云吞插件：把 PDF、扫描件、图片、
+Word、PPT、HTML 等文档解析成 Markdown、JSON 或纯文本，扫描件和图片里的文字用 OCR 认出来。
 开发流程见[插件开发指南](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md)。
 
-这是一个能安装的示例插件 `app.example.hello`：使用 nginx 官方镜像显示问候页，经网关的 `sso: proxy` 注入用户名，页面显示“你好，<用户名>”。示例没有应用账号、持久化数据或 MCP 工具。
+## 用法
 
-## 示例文件
+装好后从云吞打开，网页直接是转换界面：上传文件或粘贴链接，选输出格式（Markdown、JSON、纯文本），
+转换完预览和下载。网页和 MCP 工具共用同一个解析服务。
 
-| 路径 | 内容 |
-| --- | --- |
-| `docker-compose.yml` | 示例清单、nginx 服务和三个 `configs` |
-| `web/default.conf.template` | nginx 配置，启用 SSI 回显用户名并提供健康检查入口；只放行来自核心地址（`${WONTON_CORE_ADDRESS}`）的请求，其余来源 403 |
-| `web/index.html` | 问候页 |
-| `web/tokens.css` | 页面主题变量的后备值 |
-| `tabs/` | 示例主页的底栏图标 |
-| `screenshots/home.png` | 商店详情页的示例截图 |
-| `scripts/smoke-probes.sh` | 检查真实页面和网关注入身份的插件探针 |
+给 Agent 用的工具经 MCP 总线暴露（`ai-docling-serve__convert_document_into_docling_document` 等），
+Agent 解析文档时把 URL 交给它。
 
-从模板创建自己的插件后，替换示例清单、网页和素材；具体步骤见[写插件](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md#写插件)。
+## 模型与显卡
 
-## 更新开发套件
+- 默认解析模型（版面分析、表格结构、OCR：EasyOCR 和 RapidOCR，合计约 0.9 GB）随上游官方
+  cu128 镜像内置，装好即用，运行时不下载模型；需要联网的只有转换链接来源的文档。
+- 显卡：需要 NVIDIA 显卡（CUDA 12.8，适配 RTX 50 系），解析时显存约 2.1 GB，
+  4 GB 及以上的显卡都跑得动（推荐 8 GB）；本机实测峰值 2114 MiB（RTX 5090）。
+- 内存：serve 常驻约 2.2 GB，MCP 服务约 0.4 GB。
 
-```bash
-scripts/dev.sh kit-update
-```
-
-在从模板新建的插件仓库中更新套件；本仓库是套件源头，执行时只提示并退出。版本、可选引用和自定义脚本约定见[开发指南](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md#更新开发套件)。
+中文扫描件在网页的选项里把 OCR 引擎换成 RapidOCR。图片描述、VLM 管线这些要额外模型的
+功能没有预置模型，启用时会报错，属上游镜像的默认行为。
 
 ## 图标
 
-`icon.svg` 是本仓库原创线条图标，按本仓库 MIT 许可证分发，见 [NOTICE](NOTICE)。
+`icon.png` 来自 Docling 官方标志，来源和许可见 [NOTICE](NOTICE)。

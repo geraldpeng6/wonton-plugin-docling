@@ -1,78 +1,117 @@
-# 示例插件：nginx 显示一个网页，向登录的人问好。改成自己的应用见 https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md#写插件。
+# Docling Serve：OCR 和文档解析服务。PDF、图片、Office 文档转成 Markdown、JSON 或纯文本；
+# 模型执行用显卡（NVIDIA CUDA）。上游官方 cu128 镜像（CUDA 12.8，适配 RTX 50 系）只发 amd64。
 services:
-  web:
-    # 镜像按摘要固定（多架构镜像写清单列表的摘要），标签只给人看。
-    image: nginx:1.31.7-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
+  serve:
+    image: quay.io/docling-project/docling-serve-cu128:v1.38.2@sha256:f26a8dea114dfcfdebcd1617a9eb0a66f48351ff8b5140510d3bfc989c74c38d
+    # 镜像固定以 uid 1001 运行（上游 Containerfile 的 USER 1001）；数据目录属主必须和它一致。
+    user: "1001:0"
     environment:
-      # 网关代登录：SSI 回显的 Remote-User 只信核心带来的。官方镜像启动时对 templates 目录里的
-      # *.template 做 envsubst，把下面的地址换进 nginx 配置（见 web/default.conf.template）。
-      WONTON_CORE_ADDRESS: ${WONTON_CORE_ADDRESS}
-    # 包里的文件经 configs 交给容器（核心在启动前写进去），不能用卷挂载。
-    configs:
-      - source: site
-        target: /etc/nginx/templates/default.conf.template
-      - source: page
-        target: /usr/share/nginx/html/index.html
-      - source: tokens
-        target: /usr/share/nginx/html/tokens.css
+      TZ: ${TZ}
+      DOCLING_SERVE_ENABLE_UI: "true"
+      # 网关代登录：核心给认出用户的请求注入 X-Api-Key，应用不再有自己的登录页。
+      DOCLING_SERVE_API_KEY: ${WONTON_SECRET_API_KEY}
+      DOCLING_DEVICE: cuda
+      # 默认 2 个工作线程各自装一套模型，显存翻倍；家用单用户一个就够。
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
+      # 转换的临时文件写数据目录，不占容器可写层。
+      DOCLING_SERVE_SCRATCH_PATH: /scratch
+    volumes:
+      - ${WONTON_APP_DATA}/scratch:/scratch
+    # 查的是 /health 真的能答话，不只是进程活着。模型在启动时装进显存，start_period 放宽。
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      test: ["CMD", "python3", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=5).status == 200 else 1)"]
       interval: 30s
-      timeout: 5s
-      start_period: 30s
-      start_interval: 1s
-
-configs:
-  site:
-    file: web/default.conf.template
-  page:
-    file: web/index.html
-  tokens:
-    file: web/tokens.css
+      timeout: 10s
+      start_period: 3m
+      start_interval: 10s
+  mcp:
+    image: quay.io/docling-project/docling-serve-cu128:v1.38.2@sha256:f26a8dea114dfcfdebcd1617a9eb0a66f48351ff8b5140510d3bfc989c74c38d
+    command: ["docling-mcp-server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      TZ: ${TZ}
+      # 远程模式：转换发给 serve，MCP 服务自己不装模型、不占显存。
+      DOCLING_MCP_CONVERSION_MODE: remote
+      DOCLING_MCP_SERVICE_URL: http://serve:5001
+      DOCLING_MCP_SERVICE_API_KEY: ${WONTON_SECRET_API_KEY}
+    depends_on:
+      serve:
+        condition: service_healthy
+    # 对 /mcp 做一次真的 MCP initialize 握手，能答 JSON 才算健康。
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,sys,urllib.request; req=urllib.request.Request('http://127.0.0.1:8080/mcp', data=json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'wonton-healthcheck','version':'1.0'}}}).encode(), headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}); sys.exit(0 if urllib.request.urlopen(req, timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 1m
+      start_interval: 10s
 
 x-wonton:
   spec: "0.6"
-  # 换成你自己的：反向域名形式，装上以后不能改。
-  id: app.example.hello
-  version: 0.1.1
+  # 上游官网是 docling.ai。
+  id: ai.docling.serve
+  version: 0.1.0
   kind: app
-  title: { zh: 你好, en: Hello }
-  description: { zh: 向登录的人问好的示例网页, en: An example page that greets whoever is signed in }
-  icon: icon.svg
+  title: { en: Docling Serve }
+  description:
+    zh: 把 PDF、图片和 Office 文档解析成 Markdown、JSON 或纯文本，带 OCR 认字
+    en: Parse PDFs, images and office documents into Markdown, JSON or plain text, with OCR
+  icon: icon.png
   notices: [NOTICE]
-  screenshots: [screenshots/home.png]
-  author: { name: Example }
-  homepage: https://nginx.org
-  # 应用（这里是 nginx）的许可证；插件包自己的许可证写在仓库的 LICENSE 里。
-  license: BSD-2-Clause
+  screenshots: [screenshots/convert.png, screenshots/options.png, screenshots/result.png]
+  author: { name: geraldpeng6, url: https://github.com/geraldpeng6 }
+  homepage: https://docling.ai
+  # 上游 Docling 的许可证；插件包自己的许可证写在仓库的 LICENSE 里。
+  license: MIT
   tags:
-    zh: [工具]
-    en: [Tools]
+    zh: [文档, AI, 工具]
+    en: [Documents, AI, Tools]
   about:
     zh: |
-      一个示例网页：登录以后，页面会向你问好。新建插件时可以照着改。
+      把 PDF、扫描件、图片、Word、PPT、HTML 等文档解析成 Markdown、JSON 或纯文本，
+      供阅读、检索或喂给 AI。扫描件和图片里的文字用 OCR 认出来，表格恢复成表格。
+
+      网页里有上传和链接两种入口，转换完直接预览 Markdown，也可以下载结果。
+      中文扫描件在选项里把 OCR 引擎换成 RapidOCR。
+
+      默认解析模型（约 0.9 GB）已随官方镜像内置，装好就能用，不需要联网下载；
+      解析时显存约 2.1 GB，4 GB 以上的 NVIDIA 显卡都能跑（推荐 8 GB）。
     en: |
-      An example page: once you are signed in, the page says hello. Copy it as a starting point for a new plugin.
-  release_notes: { zh: 名字和说明更新。, en: Product name and description update. }
+      Parse PDFs, scanned pages, images, Word, PPT and HTML into Markdown, JSON or
+      plain text for reading, search or AI input. OCR recognizes the text in scans
+      and pictures, and tables come back as tables.
+
+      The web UI accepts uploads and links, previews the Markdown and lets you
+      download the result. For Chinese scans, switch the OCR engine to RapidOCR
+      in the options.
+
+      The default parsing models (about 0.9 GB) ship inside the official image, so
+      nothing is downloaded at runtime; parsing uses about 2.1 GB of VRAM and runs
+      on any NVIDIA GPU with 4 GB or more (8 GB recommended).
+  release_notes: { zh: 第一版。, en: First release. }
   webui:
-    service: web
-    port: 80
-    # 示例页回显网关注入的用户名，见 https://github.com/geraldpeng6/wonton-docs/blob/main/plugin-spec.md#网关代登录sso-proxy。
+    service: serve
+    port: 5001
+    # 直接打开 UI，不落在 API 根路径。
+    path: /ui
     sso: proxy
     proxy:
       headers:
-        Remote-User: "{user}"
-  # 能放到底栏的页面，见 https://github.com/geraldpeng6/wonton-docs/blob/main/plugin-spec.md#底栏页面tabs。放不放由用户决定。
-  tabs:
-    - id: home
-      title: { zh: 主页, en: Home }
-      icon: tabs/home.svg
-      icon_selected: tabs/home-fill.svg
-      path: /
-      # 这个页面没做适配，用默认的 inset：页面夹在 App 的栏中间，不会被挡。
-      # 想让内容从栏下滚过，写 layout: edge-to-edge，并用 --wonton-inset-* 留出栏的位置。
-  permissions: []
-  # 上游 nginx 官方镜像，amd64 和 arm64 都有；上游没写最低内存，按本机空闲实测取整（实测约 24M，取 64M）。
+        X-Api-Key: "{secret:api_key}"
+  mcp:
+    service: mcp
+    port: 8080
+    transport: streamable-http
+  # 出网：转换链接来源的文档（UI 和 MCP 工具都支持粘贴 URL）要访问外网。
+  permissions:
+    - devices.gpu
+    - network.egress
+  gpu:
+    services: [serve]
   requirements:
-    arch: [amd64, arm64]
-    memory: 64M
+    # 上游 cu128 镜像只有 amd64。
+    arch: [amd64]
+    # 本机实测：serve 常驻约 2.2G（torch CUDA），mcp 约 0.4G。
+    memory: 4G
+    gpu: { need: required, vendors: [nvidia], memory: 4G }
+  secrets:
+    api_key:
+      generate: { bytes: 32 }
