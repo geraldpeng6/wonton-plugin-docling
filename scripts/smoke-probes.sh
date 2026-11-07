@@ -2,27 +2,33 @@
 # scripts/smoke.sh 的一项一项探测，跟着插件走。没写的项会 FAIL 并给出写法，不会默认放行。
 #
 # 页面：web_assert 从标准输入读页面，命中的确是应用的真实页面时返回 0。
-# 身份：identity_check 用应用自己的“当前用户”接口断言认出的是用户管理员。没有用户体系时写 IDENTITY_NA=1，
-#       并在 SMOKE_NOTE 里写原因。dweb / web_get 是带用户会话的请求助手，可继续走应用自己的登录链。
-#       SSO 登录跳转不用自己写表单逻辑：dweb --sso 会从清单 webui.path 的入口出发（没写就是 /），提交核心
-#       登录页的 JS 自动表单并跟完重定向，返回的页面已带应用的登录态。
-# 工具：MCP_TOOL 写一个只读工具名（可带插件前缀），MCP_ARGS 是 JSON 参数；mcp_assert 从标准输入读调用结果。
-#       要断言多个工具时改成写 mcp_check；调用前要备数据时写 before_mcp。
-# 数据：合并前要验证“升级/重装不丢用户数据”时写 data_write 和 data_check（两个都写才跑）：data_write 用随机标记写
-#       一条数据并把标记原样存进 $SMOKE_STATE，data_check 读回标记去应用里找，对不上就打印看到了什么并返回非 0。
-#       应用不存用户数据时写 DATA_NA=1（两项记 N/A）。
-# 装之前要准备（如先配出口代理）：写 before_install。
+# 身份：docling-serve 没有用户体系，用户身份是网关代登录注入的 X-Api-Key；identity_check
+#       打一个受它保护的接口（不存在的任务号）：注入成功返回 404（任务不存在），没注入是 401。
+# 数据：DATA_NA=1。docling-serve 不存用户数据：转换结果单次有效，过几分钟自动删除，
+#       没有可校验的持久用户数据；临时文件在数据目录的 scratch/ 下，由服务自己清理。
+# 工具：MCP_TOOL 用上游标了 readOnlyHint 的缓存检查工具；mcp_assert 从标准输入读调用结果。
 
-web_assert() { grep -q '你好'; }   # 示例页的标题
+web_assert() { grep -q '<title>Docling Serve</title>'; }
 
-identity_check() { # 页面回显的就是网关注入的用户名
-  local page
-  page="$(dweb /)" || { echo "页面失败：$page"; return 1; }
-  grep -qF "你好，$SMOKE_OWNER" <<<"$page" || { echo "页面没回显用户 $SMOKE_OWNER：$(head -c 120 <<<"$page")"; return 1; }
+identity_check() {
+  # docling-serve 没有用户体系；用户身份是网关代登录注入的 X-Api-Key。
+  # SMOKE_WEB_URL 带着清单的 webui.path（/ui），应用 API 挂在根路径：用 dweb（dev.sh 的地址不带 path）。
+  # 打受 X-Api-Key 保护的接口（不存在的任务号）：注入成功是 404 "Task not found."，没注入是 401。
+  local out
+  out="$(dweb /v1/status/poll/wonton-smoke-probe 2>&1)" || true
+  grep -q "Task not found" <<<"$out" || {
+    echo "受 X-Api-Key 保护的接口没认出用户（401 说明网关没注入密钥）：$(head -c 150 <<<"$out")"
+    return 1
+  }
 }
 
-# 数据：合并前要验证“升级/重装不丢用户数据”时写 data_write 和 data_check（两个都写才跑）：
-#   data_write 用随机标记写一条数据，把标记原样存进 $SMOKE_STATE；data_check 读回标记、去应用里找，
-#   找不到就打印看到了什么并返回非 0。
-# 应用不存用户数据时写 DATA_NA=1（两项记 N/A）。模板的示例页不存数据，所以这里是不适用。
-export DATA_NA=1
+# shellcheck disable=SC2034  # 由探针套件 source 后读取
+DATA_NA=1
+# shellcheck disable=SC2034  # 由探针套件 source 后读取
+SMOKE_NOTE="docling-serve 不存用户数据：转换结果单次有效，超时自动删除；scratch 临时目录不构成可校验的用户数据。"
+
+# shellcheck disable=SC2034  # 由探针套件 source 后读取
+MCP_TOOL="check_document_in_local_cache"
+# shellcheck disable=SC2034  # 由探针套件 source 后读取
+MCP_ARGS='{"document_key": "wonton-smoke-probe"}'
+mcp_assert() { grep -Eq '"in_cache"[[:space:]:]*false'; }

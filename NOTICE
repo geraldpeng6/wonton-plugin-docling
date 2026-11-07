@@ -1,14 +1,16 @@
 图标
 ====
 
-`icon.svg` 为本仓库原创，按插件规范的线条风格手写，未用图片模型生成。从模板新建的插件换成自己的图标时，这里按实际情况重写。
+`icon.png` 取自上游 Docling 的官方标志（[docling-project/docling](https://github.com/docling-project/docling) 仓库
+`docs/assets/logo.png`，2026-11-07 取自 main 分支），等比缩放后放在白色底上，未改色、未变形。
 
-许可证
-------
+标志是 Docling 项目的商标。Docling 以 MIT 许可证发布，全文见
+https://github.com/docling-project/docling/blob/main/LICENSE ，摘录如下：
 
+```
 MIT License
 
-Copyright (c) 2026 Wonton plugin authors
+Copyright The Docling Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,3 +29,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+插件包其他文件
+==============
+
+`docker-compose.yml`、`scripts/smoke-probes.sh`、`README.md` 等为本仓库原创，按插件仓库的 LICENSE（MIT）发布。
+上游镜像 quay.io/docling-project/docling-serve-cu128 的许可见其内嵌的包声明；应用本身的许可证在清单 `license` 里写为 MIT。
